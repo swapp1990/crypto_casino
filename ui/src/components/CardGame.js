@@ -5,12 +5,15 @@ class CardGame extends Component {
     super(props);
     this.state = {
       deck_set: [],
+      deck_idx: 0,
       init_cardsInHand: 5,
       served_cards: [],
       player_selected_cards: [],
       num_opponents: 2,
       opponent_cards: {},
       selected_opponent: 0,
+      player_success_pairs: [],
+      game_won: false,
     };
     this.playersReceivedCards = 0;
   }
@@ -27,6 +30,15 @@ class CardGame extends Component {
   drawCards() {
     let num_cards = this.state.init_cardsInHand;
     this.chooseCardsFromDeck(num_cards, [], 0);
+    console.log("new deck initiated ", this.state.deck_idx);
+  }
+  chooseRandomCardFromDeck() {
+    let deckSet = this.state.deck_set;
+    let randomDeckCardIdx = deckSet[Math.floor(Math.random() * deckSet.length)];
+    let cardObj = this.getCardObjByIdx(randomDeckCardIdx);
+    deckSet = deckSet.filter((i) => i != randomDeckCardIdx);
+    this.setState({ deck_set: deckSet }, () => {});
+    return cardObj;
   }
   chooseCardsFromDeck(count, cards, playerIdx) {
     let deckSet = this.state.deck_set;
@@ -44,6 +56,17 @@ class CardGame extends Component {
       }
     });
     return cards;
+  }
+  giveSingleCardToPlayer(idx, card) {
+    if (idx == 0) {
+      // this.setState({ served_cards: cards });
+    } else {
+      let opponent_cards = this.state.opponent_cards;
+      let cards = opponent_cards[idx];
+      cards.push(card);
+      opponent_cards[idx] = cards;
+      this.setState({ opponent_cards: opponent_cards });
+    }
   }
   giveCardsToPlayer(idx, cards) {
     console.log("player ", idx, cards);
@@ -95,6 +118,7 @@ class CardGame extends Component {
     }
     let cardName = cardNumber + suiteSym;
     let card = {
+      deck_idx: this.state.deck_idx,
       name: cardName,
       idx: idx,
       suitTypeIdx: suitTypeIdx,
@@ -118,6 +142,28 @@ class CardGame extends Component {
       return "";
     }
   }
+  chooseCardFromOppoDeck(chosenCard, oppo_key) {
+    let cardsInHand = this.state.opponent_cards[oppo_key];
+    let cardsToRemove = [chosenCard];
+    cardsInHand = cardsInHand.filter((c) => {
+      return cardsToRemove.every((f) => {
+        return f.idx != c.idx;
+      });
+    });
+    // console.log(cardsInHand);
+    let opponent_cards = this.state.opponent_cards;
+    opponent_cards[oppo_key] = cardsInHand;
+    this.setState({ opponent_cards: opponent_cards });
+
+    //temp add a new card from deck
+    let cardObj = this.chooseRandomCardFromDeck();
+    this.giveSingleCardToPlayer(oppo_key, cardObj);
+  }
+  addChosenCardToPlayerDeck(chosenCard) {
+    let cardsInHand = this.state.served_cards;
+    cardsInHand.push(chosenCard);
+    this.setState({ served_cards: cardsInHand });
+  }
   selectPlayerCard(card) {
     let cards = this.state.player_selected_cards;
     if (!cards.find((c) => c.idx == card.idx)) {
@@ -130,6 +176,13 @@ class CardGame extends Component {
     }
     this.setState({ player_selected_cards: cards });
   }
+  selectOppoCard(oppo, card) {
+    let cardsInHand = this.state.served_cards;
+    if (cardsInHand.length >= this.state.init_cardsInHand) return;
+    // console.log(oppo, card);
+    this.chooseCardFromOppoDeck(card, oppo);
+    this.addChosenCardToPlayerDeck(card);
+  }
   pairCards() {
     let cards = this.state.player_selected_cards;
     if (cards.length != 2) return;
@@ -138,6 +191,11 @@ class CardGame extends Component {
     //Same suit: remove
     if (card1.suitTypeIdx == card2.suitTypeIdx) {
       this.removeCardsFromPlayerDeck([card1, card2]);
+      this.state.player_success_pairs.push({
+        card1: card1,
+        card2: card2,
+      });
+      //   console.log(this.state.player_success_pairs);
     }
   }
   removeCardsFromPlayerDeck(cardsToRemove) {
@@ -151,6 +209,20 @@ class CardGame extends Component {
     console.log("cardsInHand ", cardsInHand);
     this.setState({ player_selected_cards: [] });
     this.setState({ served_cards: cardsInHand });
+    if (cardsInHand.length == 0) {
+      console.log("game won!");
+      this.setState({ game_won: true });
+    }
+  }
+  getServed() {
+    if (this.state.deck_set.length < this.state.init_cardsInHand) {
+      let deckIdx = this.state.deck_idx + 1;
+      this.setState({ deck_idx: deckIdx }, this.initDeck());
+    } else {
+      this.setState({ game_won: false });
+      this.chooseCardsFromDeck(this.state.init_cardsInHand, [], 0);
+    }
+    console.log(this.state.deck_set);
   }
 
   render() {
@@ -174,7 +246,7 @@ class CardGame extends Component {
                     this.getCardColor(card)
                   }
                 >
-                  {card.name}
+                  {card.deck_idx}: {card.name}
                 </h3>
               </button>
             </div>
@@ -193,18 +265,52 @@ class CardGame extends Component {
           </h3>
         </div>
         <div>
-          <button
-            className={
-              "text-center rounded-lg m-2 hover:shadow-lg cursor-pointer"
-            }
-            onClick={(event) => {
-              this.pairCards();
-            }}
-          >
-            <h3 className="bg-red-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">
-              Pair
-            </h3>
-          </button>
+          {!this.state.game_won && (
+            <button
+              className={
+                "text-center rounded-lg m-2 hover:shadow-lg cursor-pointer"
+              }
+              onClick={(event) => {
+                this.pairCards();
+              }}
+            >
+              <h3 className="bg-red-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">
+                Pair
+              </h3>
+            </button>
+          )}
+          {this.state.game_won && (
+            <button
+              className={
+                "text-center rounded-lg m-2 hover:shadow-lg cursor-pointer"
+              }
+              onClick={(event) => {
+                this.getServed();
+              }}
+            >
+              <h3 className="bg-red-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">
+                Play again
+              </h3>
+            </button>
+          )}
+        </div>
+        <div>
+          <div>
+            <span className="text-white font-bold">
+              Collected Pairs: {this.state.player_success_pairs.length}
+            </span>
+          </div>
+          <div class="p-2 overflow-y-scroll">
+            {this.state.player_success_pairs.map((c, i) => {
+              return (
+                <div key={i}>
+                  <span className="text-white font-bold">
+                    {c.card1.name}+{c.card2.name}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
         </div>
       </div>
     );
@@ -238,8 +344,11 @@ class CardGame extends Component {
                       <button
                         key={key}
                         className={
-                          "text-center text-white bg-blueGray-700 rounded-lg m-2 hover:shadow-lg cursor-pointer  "
+                          "text-center text-white bg-blueGray-700 rounded-lg m-2 hover:shadow-lg cursor-pointer focus:border-blue-300"
                         }
+                        onClick={(event) => {
+                          this.selectOppoCard(oppo_key, c);
+                        }}
                       >
                         <h3
                           className={
@@ -247,7 +356,7 @@ class CardGame extends Component {
                             this.getCardColor(c)
                           }
                         >
-                          {c.name}
+                          {c.deck_idx}: {c.name}
                         </h3>
                       </button>
                     );
