@@ -4,7 +4,7 @@ import React, { createContext, useReducer } from "react";
 import fs from "fs";
 import Web3 from "web3";
 import detectEthereumProvider from "@metamask/detect-provider";
-// import LocationNFT from "../abi/LocationNFT.json";
+import CardGame from "../abi/CardGame.json";
 
 const Dispatcher = require("flux").Dispatcher;
 const Emitter = require("events").EventEmitter;
@@ -143,12 +143,11 @@ class Store {
     const accounts = await web3.eth.getAccounts();
     // console.log(accounts);
     store.setStore({ account: accounts[0] });
-    // this.sendTestTransaction(web3);
-    // const contractAddress = WorldNFT.networks["2"].address;
-    // console.log("WorldNFT contract", contractAddress);
-    // const abi = WorldNFT.abi;
-    // const dapp_contract = new web3.eth.Contract(abi, contractAddress);
-    // store.setStore({ dapp_contract: dapp_contract });
+    const contractAddress = CardGame.networks["2"].address;
+    console.log("CardGame contract", contractAddress);
+    const abi = CardGame.abi;
+    const dapp_contract = new web3.eth.Contract(abi, contractAddress);
+    store.setStore({ dapp_contract: dapp_contract });
   };
 
   configure = async (payload) => {

@@ -25,7 +25,7 @@ const dispatcher = Store.dispatcher;
 function App() {
   useEffect(() => {
     // Some initialization logic here
-    // dispatcher.dispatch({ type: "CONFIGURE", content: {} });
+    dispatcher.dispatch({ type: "CONFIGURE", content: {} });
   }, []);
 
   return (

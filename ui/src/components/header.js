@@ -16,21 +16,16 @@ class Header extends Component {
 
   getCompressed(addr) {
     const len = addr.length;
-    return addr.substring(0, 6) + "..." + addr.substring(len - 5, len - 1);
+    return addr.substring(0, 6) + "..." + addr.substring(len - 5, len);
   }
 
   async componentWillMount() {
     // console.log("Header ", this.props);
     const storeUpdated = async () => {
-      //   let accountAddress = store.getStore().account;
-      //   if (accountAddress) {
-      //     this.setState({ accountFmt: this.getCompressed(accountAddress) });
-      //     let contract = store.getStore().dapp_contract;
-      //     if (contract) {
-      //       //   var balance = await contract.methods.balanceOf(accountAddress).call();
-      //       //   console.log("bal ", balance);
-      //     }
-      //   }
+      let accountAddress = store.getStore().account;
+      if (accountAddress) {
+        this.setState({ accountFmt: this.getCompressed(accountAddress) });
+      }
     };
     emitter.on("StoreUpdated", storeUpdated);
   }

@@ -1,4 +1,26 @@
 import React, { Component } from "react";
+import * as card_utils from "../utils/card_utils";
+import Store from "../stores/store";
+const store = Store.store;
+const emitter = Store.emitter;
+
+const Styles = {
+  mainBtn: {
+    height: "40px",
+    width: "200px",
+    color: "#FFCA0E",
+    border: "1px solid #000000",
+    borderRadius: "10px 10px 10px 10px",
+    fontSize: "15px",
+  },
+  playerCardBtn: {
+    height: "80px",
+    width: "100px",
+    backgroundColor: "white",
+    border: "1px solid #000000",
+    borderRadius: "10px 10px 10px 10px",
+  },
+};
 
 class CardGame extends Component {
   constructor(props) {
@@ -8,391 +30,198 @@ class CardGame extends Component {
       deck_idx: 0,
       init_cardsInHand: 5,
       served_cards: [],
-      player_selected_cards: [],
-      num_opponents: 2,
-      opponent_cards: {},
-      selected_opponent: 0,
-      player_success_pairs: [],
-      game_won: false,
+      contract: null,
     };
-    this.playersReceivedCards = 0;
   }
   async componentWillMount() {
+    // let cards = [this.getCardObjByIdx(23), this.getCardObjByIdx(34)];
+    // this.setState({ served_cards: cards });
     this.initDeck();
+    emitter.on("StoreUpdated", async () => {
+      this.setState({ contract: store.getStore().dapp_contract }, async () => {
+        console.log("updated contract ", this.state.contract);
+        if (this.state.contract) {
+          this.displayHand();
+        }
+      });
+    });
   }
+
+  async displayHand() {
+    let nftId = await this.state.contract.methods.nftId().call();
+    console.log("nftId ", nftId);
+    let served_cards = [];
+    let inHandTokens = await this.state.contract.methods
+      .getInHandTokens(store.getStore().account)
+      .call();
+    console.log("inHandTokens ", inHandTokens);
+    for (var i = 0; i < inHandTokens.length; i++) {
+      const nft = await this.state.contract.methods
+        .getTokenDetails(inHandTokens[i])
+        .call();
+      let card = card_utils.getCardObjByIdx(nft.cardIdx);
+      card.deck_idx = nft.deckIdx;
+      served_cards.push(card);
+    }
+
+    // for (var i = 0; i < nftId; i++) {
+    //   const nft = await this.state.contract.methods.getTokenDetails(i).call();
+    //   console.log(nft);
+    //   const owner = await this.state.contract.methods.getOwnerOf(i).call();
+    //   console.log(owner);
+    // }
+
+    this.setState({ served_cards: served_cards });
+  }
+
   initDeck() {
     var deck_set = [];
     for (var i = 1; i <= 52; i++) {
       deck_set.push(i);
     }
-    this.setState({ deck_set: deck_set }, this.drawCards);
+    this.setState({ deck_set: deck_set });
   }
-  drawCards() {
-    let num_cards = this.state.init_cardsInHand;
-    this.chooseCardsFromDeck(num_cards, [], 0);
-    console.log("new deck initiated ", this.state.deck_idx);
-  }
-  chooseRandomCardFromDeck() {
+  chooseCardsFromDeck(count) {
     let deckSet = this.state.deck_set;
-    let randomDeckCardIdx = deckSet[Math.floor(Math.random() * deckSet.length)];
-    let cardObj = this.getCardObjByIdx(randomDeckCardIdx);
-    deckSet = deckSet.filter((i) => i != randomDeckCardIdx);
-    this.setState({ deck_set: deckSet }, () => {});
-    return cardObj;
-  }
-  chooseCardsFromDeck(count, cards, playerIdx) {
-    let deckSet = this.state.deck_set;
-    let randomDeckCardIdx = deckSet[Math.floor(Math.random() * deckSet.length)];
-    let cardObj = this.getCardObjByIdx(randomDeckCardIdx);
-    cards.push(cardObj);
-    // console.log("c ", cards);
-    deckSet = deckSet.filter((i) => i != randomDeckCardIdx);
-    this.setState({ deck_set: deckSet }, () => {
-      count--;
-      if (count > 0) {
-        this.chooseCardsFromDeck(count, cards, playerIdx);
-      } else {
-        this.giveCardsToPlayer(playerIdx, cards);
-      }
+    // choose random cards idxs
+    let randomIdxs = card_utils.pickMultipleRandomly(deckSet, count);
+    let pickedCards = [];
+    randomIdxs.forEach((idx) => {
+      let cardObj = card_utils.getCardObjByIdx(idx);
+      cardObj.deck_idx = this.state.deck_idx;
+      pickedCards.push(cardObj);
     });
-    return cards;
+    deckSet = deckSet.filter((i) => !randomIdxs.includes(i));
+    console.log("deckSet len ", deckSet.length);
+    this.setState({ deck_set: deckSet });
+    return pickedCards;
   }
-  giveSingleCardToPlayer(idx, card) {
-    if (idx == 0) {
-      // this.setState({ served_cards: cards });
-    } else {
-      let opponent_cards = this.state.opponent_cards;
-      let cards = opponent_cards[idx];
-      cards.push(card);
-      opponent_cards[idx] = cards;
-      this.setState({ opponent_cards: opponent_cards });
-    }
-  }
-  giveCardsToPlayer(idx, cards) {
-    console.log("player ", idx, cards);
-    if (idx == 0) {
-      this.setState({ served_cards: cards });
-    } else {
-      let opponent_cards = this.state.opponent_cards;
-      opponent_cards[idx] = cards;
-      this.setState({ opponent_cards: opponent_cards });
-    }
-    if (this.playersReceivedCards < this.state.num_opponents) {
-      this.playersReceivedCards++;
-      let num_cards = this.state.init_cardsInHand;
-      this.chooseCardsFromDeck(num_cards, [], this.playersReceivedCards);
-    }
-  }
-  getSuiteSymbolFromIdx(idx) {
-    let suiteSymbol = null;
-    switch (idx) {
-      case 0:
-        suiteSymbol = "♥";
-        break;
-      case 1:
-        suiteSymbol = "♦";
-        break;
-      case 2:
-        suiteSymbol = "♠";
-        break;
-      case 3:
-        suiteSymbol = "♣";
-        break;
-      default:
-        suiteSymbol = "";
-        break;
-    }
-    return suiteSymbol;
-  }
-  getCardObjByIdx(idx) {
-    const suitTypeIdx = Math.floor((idx - 1) / 13);
-    const suiteSym = this.getSuiteSymbolFromIdx(suitTypeIdx);
-    let cardNumber = idx - suitTypeIdx * 13;
-    cardNumber = cardNumber.toString();
-    if (cardNumber == 13) {
-      cardNumber = "K";
-    } else if (cardNumber == 12) {
-      cardNumber = "Q";
-    } else if (cardNumber == 11) {
-      cardNumber = "J";
-    }
-    let cardName = cardNumber + suiteSym;
-    let card = {
-      deck_idx: this.state.deck_idx,
-      name: cardName,
-      idx: idx,
-      suitTypeIdx: suitTypeIdx,
-      cardValue: cardNumber,
-    };
-    return card;
-  }
-
-  //Render events/methods
-  getCardColor(card) {
-    if (card.suitTypeIdx < 2) {
-      return "text-red-500";
-    } else {
-      return "text-black";
-    }
-  }
-  focusCardClass(card) {
-    if (this.state.player_selected_cards.find((c) => c.name == card.name)) {
-      return "border-2 border-red-500";
-    } else {
-      return "";
-    }
-  }
-  chooseCardFromOppoDeck(chosenCard, oppo_key) {
-    let cardsInHand = this.state.opponent_cards[oppo_key];
-    let cardsToRemove = [chosenCard];
-    cardsInHand = cardsInHand.filter((c) => {
-      return cardsToRemove.every((f) => {
-        return f.idx != c.idx;
-      });
+  async getNewHand() {
+    // let auctionObj = await contract.methods.getAuctionInfo(id).call();
+    let chosenCards = this.chooseCardsFromDeck(this.state.init_cardsInHand);
+    console.log(chosenCards);
+    let nftList = [];
+    chosenCards.forEach((c, i) => {
+      nftList.push([c.deck_idx, c.idx, c.suitTypeIdx, true]);
     });
-    // console.log(cardsInHand);
-    let opponent_cards = this.state.opponent_cards;
-    opponent_cards[oppo_key] = cardsInHand;
-    this.setState({ opponent_cards: opponent_cards });
-
-    //temp add a new card from deck
-    let cardObj = this.chooseRandomCardFromDeck();
-    this.giveSingleCardToPlayer(oppo_key, cardObj);
-  }
-  addChosenCardToPlayerDeck(chosenCard) {
-    let cardsInHand = this.state.served_cards;
-    cardsInHand.push(chosenCard);
-    this.setState({ served_cards: cardsInHand });
-  }
-  selectPlayerCard(card) {
-    let cards = this.state.player_selected_cards;
-    if (!cards.find((c) => c.idx == card.idx)) {
-      if (cards.length >= 2) {
-        cards.pop();
-      }
-      cards.push(card);
+    console.log("nftList ", nftList);
+    if (this.state.contract) {
+      let result = await this.state.contract.methods
+        .mintNewHand(nftList)
+        .send({
+          from: store.getStore().account,
+          value: 0,
+          gasPrice: 1000000000,
+          gasLimit: 210000,
+        })
+        .on("transactionHash", (hash) => {
+          console.log("transactionHash ", hash);
+          if (this.state.contract.events.HandMinted) {
+            this.state.contract.events.HandMinted({}, async (error, event) => {
+              console.log("HandMinted ", event);
+              this.displayHand();
+            });
+          }
+        })
+        .on("error", (error) => {
+          window.alert("Error ", error);
+        });
     } else {
-      cards = cards.filter((c) => c.idx != card.idx);
+      console.log("no contract found");
     }
-    this.setState({ player_selected_cards: cards });
-  }
-  selectOppoCard(oppo, card) {
-    let cardsInHand = this.state.served_cards;
-    if (cardsInHand.length >= this.state.init_cardsInHand) return;
-    // console.log(oppo, card);
-    this.chooseCardFromOppoDeck(card, oppo);
-    this.addChosenCardToPlayerDeck(card);
-  }
-  pairCards() {
-    let cards = this.state.player_selected_cards;
-    if (cards.length != 2) return;
-    let card1 = cards[0];
-    let card2 = cards[1];
-    //Same suit: remove
-    if (card1.suitTypeIdx == card2.suitTypeIdx) {
-      this.removeCardsFromPlayerDeck([card1, card2]);
-      this.state.player_success_pairs.push({
-        card1: card1,
-        card2: card2,
-      });
-      //   console.log(this.state.player_success_pairs);
-    }
-  }
-  removeCardsFromPlayerDeck(cardsToRemove) {
-    let cardsInHand = this.state.served_cards;
-    if (cardsInHand.length < 2) return;
-    cardsInHand = cardsInHand.filter((c) => {
-      return cardsToRemove.every((f) => {
-        return f.idx != c.idx;
-      });
-    });
-    console.log("cardsInHand ", cardsInHand);
-    this.setState({ player_selected_cards: [] });
-    this.setState({ served_cards: cardsInHand });
-    if (cardsInHand.length == 0) {
-      console.log("game won!");
-      this.setState({ game_won: true });
-    }
-  }
-  getServed() {
-    if (this.state.deck_set.length < this.state.init_cardsInHand) {
-      let deckIdx = this.state.deck_idx + 1;
-      this.setState({ deck_idx: deckIdx }, this.initDeck());
-    } else {
-      this.setState({ game_won: false });
-      this.chooseCardsFromDeck(this.state.init_cardsInHand, [], 0);
-    }
-    console.log(this.state.deck_set);
   }
 
   render() {
-    let player_cards = (
-      <div className="flex flex-row w-full justify-center">
-        {this.state.served_cards.map((card, key) => {
-          return (
-            <div className="m-2" key={key}>
-              <button
-                className={
-                  "text-center bg-blueGray-700 rounded-lg m-2 hover:shadow-lg cursor-pointer focus:border-blue-300 " +
-                  this.focusCardClass(card)
-                }
-                onClick={(event) => {
-                  this.selectPlayerCard(card);
-                }}
-              >
-                <h3
-                  className={
-                    "text-4xl font-semibold leading-normal mb-2 " +
-                    this.getCardColor(card)
-                  }
-                >
-                  {card.deck_idx}: {card.name}
-                </h3>
-              </button>
-            </div>
-          );
-        })}
-      </div>
-    );
-    let player_menu = (
-      <div>
-        <div className="flex flex-row w-full justify-center bg-blueGray-700">
-          <h3 className="text-2x font-semibold leading-normal text-white mb-2">
-            Selected Cards:
-            {this.state.player_selected_cards.map((card, key) => {
-              return <span className="p-2">{card.name}</span>;
-            })}
-          </h3>
-        </div>
-        <div>
-          {!this.state.game_won && (
-            <button
-              className={
-                "text-center rounded-lg m-2 hover:shadow-lg cursor-pointer"
-              }
-              onClick={(event) => {
-                this.pairCards();
-              }}
-            >
-              <h3 className="bg-red-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">
-                Pair
-              </h3>
-            </button>
-          )}
-          {this.state.game_won && (
-            <button
-              className={
-                "text-center rounded-lg m-2 hover:shadow-lg cursor-pointer"
-              }
-              onClick={(event) => {
-                this.getServed();
-              }}
-            >
-              <h3 className="bg-red-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">
-                Play again
-              </h3>
-            </button>
-          )}
-        </div>
-        <div>
-          <div>
-            <span className="text-white font-bold">
-              Collected Pairs: {this.state.player_success_pairs.length}
-            </span>
-          </div>
-          <div class="p-2 overflow-y-scroll">
-            {this.state.player_success_pairs.map((c, i) => {
-              return (
-                <div key={i}>
-                  <span className="text-white font-bold">
-                    {c.card1.name}+{c.card2.name}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      </div>
-    );
-    let opponent_cards = <h1>No Opponents</h1>;
-    // console.log(this.state.opponent_cards);
-    let opponent_keys = Object.keys(this.state.opponent_cards);
-    if (opponent_keys.length > 1) {
-      opponent_cards = (
-        <div className="flex flex-row w-full justify-center">
-          {Array.apply(null, {
-            length: opponent_keys.length,
-          }).map((opponent, key) => {
-            let oppo_key = opponent_keys[key];
-            // console.log("key ", oppo_key);
-            let cards = this.state.opponent_cards[oppo_key];
-
-            return (
-              <div className="flex flex-col w-full justify-center">
-                <div className="flex flex-row w-full justify-center">
-                  <h3
-                    className={
-                      "text-3x font-semibold leading-normal mb-2 text-white"
-                    }
-                  >
-                    Choose Player {key + 1}
-                  </h3>
-                </div>
-                <div className="flex flex-row w-full justify-center">
-                  {cards.map((c, key) => {
-                    return (
-                      <button
-                        key={key}
-                        className={
-                          "text-center text-white bg-blueGray-700 rounded-lg m-2 hover:shadow-lg cursor-pointer focus:border-blue-300"
-                        }
-                        onClick={(event) => {
-                          this.selectOppoCard(oppo_key, c);
-                        }}
-                      >
-                        <h3
-                          className={
-                            "text-2x font-semibold leading-normal mb-2 " +
-                            this.getCardColor(c)
-                          }
-                        >
-                          {c.deck_idx}: {c.name}
-                        </h3>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      );
-    }
-
     return (
       <>
-        <div className="relative pt-16 pb-32 flex content-center items-center justify-center min-h-screen-75">
-          <div
-            className="absolute top-0 w-full h-full bg-center bg-cover"
+        <div className="flex flex-row home" style={{ height: "90vh" }}>
+          <aside
+            className="sidebar"
             style={{
-              backgroundImage:
-                "url('https://images.unsplash.com/photo-1557804506-669a67965ba0?ixlib=rb-1.2.1&ixid=eyJhcHBfaWQiOjEyMDd9&auto=format&fit=crop&w=1267&q=80')",
+              backgroundColor: "rgba(196, 196, 196,0.2)",
+              width: "18%",
             }}
           >
-            <span
-              id="blackOverlay"
-              className="w-full h-full absolute opacity-75 bg-black"
-            ></span>
-          </div>
-          <div className="container relative mx-auto">
-            <div className="items-center flex flex-wrap">
-              <div className="w-full lg:w-6/12 px-4 ml-auto mr-auto text-center">
-                {opponent_cards}
-                {player_cards}
-                {player_menu}
+            <div className="sidebar-header flex py-4 px-2">
+              <span
+                className="self-start"
+                style={{
+                  color: "#000000",
+                  fontWeight: 600,
+                  fontSize: "50px",
+                  fontStyle: "normal",
+                  lineHeight: "73px",
+                }}
+              >
+                Filter
+              </span>
+            </div>
+          </aside>
+          <main className="main flex flex-col flex-grow">
+            <header className="header bg-white shadow py-4 px-4">
+              Options
+            </header>
+            <div className="main-content">
+              <div
+                className="w-full p-2"
+                style={{
+                  height: "85vh",
+                }}
+              >
+                <div
+                  className="relative w-full p-1 flex justify-center bg-gray-100"
+                  style={{
+                    height: "30%",
+                  }}
+                >
+                  Opponent Menu
+                </div>
+                <div
+                  className="relative w-full p-1 flex flex-col justify-start bg-gray-200"
+                  style={{
+                    height: "70%",
+                  }}
+                >
+                  <div
+                    className="flex flex-row w-full justify-center bg-red-300"
+                    style={{
+                      height: "40%",
+                    }}
+                  >
+                    {this.state.served_cards.map((card, key) => {
+                      return (
+                        <div className="m-2" key={key}>
+                          <button
+                            className={
+                              "text-center rounded-lg m-2 hover:shadow-lg cursor-pointer"
+                            }
+                            style={Styles.playerCardBtn}
+                          >
+                            <h3
+                              className={
+                                "text-4xl font-semibold leading-normal mb-2 "
+                              }
+                            >
+                              {card.deck_idx}: {card.name}
+                            </h3>
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div>
+                    <button
+                      className="font-semibold uppercase bg-red-500"
+                      style={Styles.mainBtn}
+                      onClick={() => this.getNewHand()}
+                    >
+                      Get Hand
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
-          </div>
+          </main>
         </div>
       </>
     );
