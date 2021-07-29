@@ -22,7 +22,9 @@ contract("CardGame", function (accounts) {
     assert(Number(nftId) === card_hand.length);
     const firstNft = await gameContract.getTokenDetails(0);
     assert(Number(firstNft.cardIdx) === 10);
-    const tokens = await gameContract.getInHandTokens();
+    const tokens = await gameContract.getInHandTokens(accounts[0]);
     console.log(Number(tokens[0]));
+    const deckIdxTaken = await gameContract.getDeckTaken();
+    console.log(deckIdxTaken);
   });
 });

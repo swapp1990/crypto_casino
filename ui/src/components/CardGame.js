@@ -17,6 +17,13 @@ const Styles = {
     height: "80px",
     width: "100px",
     backgroundColor: "white",
+    // border: "1px solid #000000",
+    // borderRadius: "10px 10px 10px 10px",
+  },
+  oppoCardBtn: {
+    height: "50px",
+    width: "50px",
+    backgroundColor: "white",
     border: "1px solid #000000",
     borderRadius: "10px 10px 10px 10px",
   },
@@ -30,13 +37,76 @@ class CardGame extends Component {
       deck_idx: 0,
       init_cardsInHand: 5,
       served_cards: [],
+      opponents_cards: [],
+      player_selected_cards: [],
+      player_success_pairs: [],
+      game_won: false,
       contract: null,
     };
+  }
+  getCompressed(addr) {
+    const len = addr.length;
+    return addr.substring(0, 6) + "..." + addr.substring(len - 5, len);
   }
   async componentWillMount() {
     // let cards = [this.getCardObjByIdx(23), this.getCardObjByIdx(34)];
     // this.setState({ served_cards: cards });
-    this.initDeck();
+    // let oppo_cards = [
+    //   {
+    //     address: "0x099E...C2Fd4",
+    //     cards: [
+    //       {
+    //         cardValue: "6",
+    //         deck_idx: "0",
+    //         idx: "32",
+    //         name: "6♠",
+    //         suitTypeIdx: 2,
+    //       },
+    //       {
+    //         cardValue: "6",
+    //         deck_idx: "0",
+    //         idx: "32",
+    //         name: "6♠",
+    //         suitTypeIdx: 2,
+    //       },
+    //       {
+    //         cardValue: "6",
+    //         deck_idx: "0",
+    //         idx: "32",
+    //         name: "6♠",
+    //         suitTypeIdx: 2,
+    //       },
+    //       {
+    //         cardValue: "6",
+    //         deck_idx: "0",
+    //         idx: "32",
+    //         name: "6♠",
+    //         suitTypeIdx: 2,
+    //       },
+    //       {
+    //         cardValue: "6",
+    //         deck_idx: "0",
+    //         idx: "32",
+    //         name: "6♠",
+    //         suitTypeIdx: 2,
+    //       },
+    //     ],
+    //   },
+    //   {
+    //     address: "0x099E4E5Bb2b01a80A49D237317b2d868658C2Fd4",
+    //     cards: [
+    //       {
+    //         cardValue: "6",
+    //         deck_idx: "0",
+    //         idx: "32",
+    //         name: "6♠",
+    //         suitTypeIdx: 2,
+    //       },
+    //     ],
+    //   },
+    // ];
+    // this.setState({ opponents_cards: oppo_cards });
+
     emitter.on("StoreUpdated", async () => {
       this.setState({ contract: store.getStore().dapp_contract }, async () => {
         console.log("updated contract ", this.state.contract);
@@ -55,6 +125,7 @@ class CardGame extends Component {
       .getInHandTokens(store.getStore().account)
       .call();
     console.log("inHandTokens ", inHandTokens);
+
     for (var i = 0; i < inHandTokens.length; i++) {
       const nft = await this.state.contract.methods
         .getTokenDetails(inHandTokens[i])
@@ -72,17 +143,52 @@ class CardGame extends Component {
     // }
 
     this.setState({ served_cards: served_cards });
+
+    //show opponents hands
+    let players = await this.state.contract.methods.getPlayers().call();
+    console.log("players ", players);
+    let opponents = players.filter((p) => p != store.getStore().account);
+    console.log("opponents ", opponents);
+    let opponents_cards = [];
+    for (let i = 0; i < opponents.length; i++) {
+      let opponentCardTokens = await this.state.contract.methods
+        .getInHandTokens(opponents[i])
+        .call();
+      //   console.log("opponentCardTokens ", opponentCardTokens);
+      let opponentObj = {
+        address: this.getCompressed(opponents[i]),
+        cards: [],
+      };
+      for (var j = 0; j < opponentCardTokens.length; j++) {
+        const nft = await this.state.contract.methods
+          .getTokenDetails(opponentCardTokens[j])
+          .call();
+        let card = card_utils.getCardObjByIdx(nft.cardIdx);
+        card.deck_idx = nft.deckIdx;
+        opponentObj.cards.push(card);
+      }
+      console.log(opponentObj);
+      opponents_cards.push(opponentObj);
+    }
+
+    // console.log("opponents_cards ", opponents_cards);
+    this.setState({ opponents_cards: opponents_cards });
   }
 
-  initDeck() {
-    var deck_set = [];
+  async initDeck() {
+    var deckSet = [];
     for (var i = 1; i <= 52; i++) {
-      deck_set.push(i);
+      deckSet.push(i);
     }
-    this.setState({ deck_set: deck_set });
+    let deckIdxsTaken = await this.state.contract.methods.getDeckTaken().call();
+    deckIdxsTaken = deckIdxsTaken.map((i) => Number(i));
+    console.log("deckIdxsTaken ", deckIdxsTaken);
+    deckSet = deckSet.filter((i) => !deckIdxsTaken.includes(i));
+    console.log("deckSet len ", deckSet.length);
+    this.setState({ deck_set: deckSet });
+    return deckSet;
   }
-  chooseCardsFromDeck(count) {
-    let deckSet = this.state.deck_set;
+  chooseCardsFromDeck(count, deckSet) {
     // choose random cards idxs
     let randomIdxs = card_utils.pickMultipleRandomly(deckSet, count);
     let pickedCards = [];
@@ -91,14 +197,14 @@ class CardGame extends Component {
       cardObj.deck_idx = this.state.deck_idx;
       pickedCards.push(cardObj);
     });
-    deckSet = deckSet.filter((i) => !randomIdxs.includes(i));
-    console.log("deckSet len ", deckSet.length);
-    this.setState({ deck_set: deckSet });
     return pickedCards;
   }
   async getNewHand() {
-    // let auctionObj = await contract.methods.getAuctionInfo(id).call();
-    let chosenCards = this.chooseCardsFromDeck(this.state.init_cardsInHand);
+    let deckSet = await this.initDeck();
+    let chosenCards = this.chooseCardsFromDeck(
+      this.state.init_cardsInHand,
+      deckSet
+    );
     console.log(chosenCards);
     let nftList = [];
     chosenCards.forEach((c, i) => {
@@ -131,7 +237,141 @@ class CardGame extends Component {
     }
   }
 
+  //Render events/methods
+  getCardColor(card) {
+    if (card.suitTypeIdx < 2) {
+      return "text-red-500";
+    } else {
+      return "text-black";
+    }
+  }
+  focusCardClass(card) {
+    if (this.state.player_selected_cards.find((c) => c.name == card.name)) {
+      return "border-2 border-red-500";
+    } else {
+      return "";
+    }
+  }
+
+  //player card events
+  selectPlayerCard(card) {
+    let cards = this.state.player_selected_cards;
+    if (!cards.find((c) => c.idx == card.idx)) {
+      if (cards.length >= 2) {
+        cards.pop();
+      }
+      cards.push(card);
+    } else {
+      cards = cards.filter((c) => c.idx != card.idx);
+    }
+    this.setState({ player_selected_cards: cards });
+  }
+  pairCards() {
+    let cards = this.state.player_selected_cards;
+    if (cards.length != 2) return;
+    let card1 = cards[0];
+    let card2 = cards[1];
+    //Same suit: remove
+    if (card1.suitTypeIdx == card2.suitTypeIdx) {
+      this.removeCardsFromPlayerDeck([card1, card2]);
+      this.state.player_success_pairs.push({
+        card1: card1,
+        card2: card2,
+      });
+      //   console.log(this.state.player_success_pairs);
+    }
+  }
+  removeCardsFromPlayerDeck(cardsToRemove) {
+    let cardsInHand = this.state.served_cards;
+    if (cardsInHand.length < 2) return;
+    cardsInHand = cardsInHand.filter((c) => {
+      return cardsToRemove.every((f) => {
+        return f.idx != c.idx;
+      });
+    });
+    console.log("cardsInHand ", cardsInHand);
+    this.setState({ player_selected_cards: [] });
+    this.setState({ served_cards: cardsInHand });
+    if (cardsInHand.length == 0) {
+      console.log("game won!");
+      this.setState({ game_won: true });
+    }
+  }
+
   render() {
+    let player_cards = (
+      <div
+        className="flex flex-row w-full justify-center bg-red-300"
+        style={{
+          height: "20%",
+        }}
+      >
+        {this.state.served_cards.map((card, key) => {
+          return (
+            <div className="m-2" key={key}>
+              <button
+                className={
+                  "text-center rounded-lg m-2 hover:shadow-lg cursor-pointer " +
+                  this.focusCardClass(card)
+                }
+                style={Styles.playerCardBtn}
+                onClick={(event) => {
+                  this.selectPlayerCard(card);
+                }}
+              >
+                <h3
+                  className={
+                    "text-4xl font-semibold leading-normal mb-2 " +
+                    this.getCardColor(card)
+                  }
+                >
+                  {card.deck_idx}: {card.name}
+                </h3>
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    );
+    let player_menu = (
+      <div className="bg-red-300 m-2 flex flex-col w-full justify-center items-center">
+        <div className="flex flex-row w-full justify-center bg-yellow-200">
+          <h3 className="text-2x font-semibold leading-normal text-white mb-2">
+            Selected Cards:
+            {this.state.player_selected_cards.map((card, key) => {
+              return <span className="p-2">{card.name}</span>;
+            })}
+          </h3>
+        </div>
+        <div className="flex flex-row">
+          {this.state.served_cards.length == 0 && (
+            <div>
+              <button
+                className="font-semibold uppercase m-2 bg-red-500"
+                style={Styles.mainBtn}
+                onClick={() => this.getNewHand()}
+              >
+                Get Hand
+              </button>
+            </div>
+          )}
+          {!this.state.game_won && (
+            <button
+              className={
+                "text-center rounded-lg uppercase m-2 font-semibold hover:shadow-lg cursor-pointer bg-green-500"
+              }
+              style={Styles.mainBtn}
+              onClick={(event) => {
+                this.pairCards();
+              }}
+            >
+              Pair
+            </button>
+          )}
+        </div>
+      </div>
+    );
+
     return (
       <>
         <div className="flex flex-row home" style={{ height: "90vh" }}>
@@ -169,12 +409,60 @@ class CardGame extends Component {
                 }}
               >
                 <div
-                  className="relative w-full p-1 flex justify-center bg-gray-100"
+                  className="relative w-full p-1 flex flex-col bg-gray-100"
                   style={{
                     height: "30%",
                   }}
                 >
-                  Opponent Menu
+                  <div style={{ width: "100%", height: "10%" }}>
+                    Opponent Menu
+                  </div>
+                  <div
+                    className="m-2 flex flex-row justify-center items-top"
+                    style={{ width: "100%", height: "90%" }}
+                  >
+                    {this.state.opponents_cards.map((cardObj, key) => {
+                      return (
+                        <div
+                          className="m-2 bg-pink-200 flex flex-col justify-center"
+                          key={key}
+                          style={{
+                            width: "300px",
+                            height: "100%",
+                          }}
+                        >
+                          <h1>Address: {cardObj.address}</h1>
+                          <div
+                            className="flex flex-row w-full justify-center bg-red-300"
+                            style={{
+                              height: "40%",
+                            }}
+                          >
+                            {cardObj.cards.map((card, key) => {
+                              return (
+                                <div className="m-1" key={key}>
+                                  <button
+                                    className={
+                                      "text-center rounded-lg m-1 hover:shadow-lg cursor-pointer"
+                                    }
+                                    style={Styles.oppoCardBtn}
+                                  >
+                                    <h5
+                                      className={
+                                        "text-xl font-semibold leading-normal mb-2 "
+                                      }
+                                    >
+                                      {card.deck_idx}: {card.name}
+                                    </h5>
+                                  </button>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
                 <div
                   className="relative w-full p-1 flex flex-col justify-start bg-gray-200"
@@ -182,42 +470,8 @@ class CardGame extends Component {
                     height: "70%",
                   }}
                 >
-                  <div
-                    className="flex flex-row w-full justify-center bg-red-300"
-                    style={{
-                      height: "40%",
-                    }}
-                  >
-                    {this.state.served_cards.map((card, key) => {
-                      return (
-                        <div className="m-2" key={key}>
-                          <button
-                            className={
-                              "text-center rounded-lg m-2 hover:shadow-lg cursor-pointer"
-                            }
-                            style={Styles.playerCardBtn}
-                          >
-                            <h3
-                              className={
-                                "text-4xl font-semibold leading-normal mb-2 "
-                              }
-                            >
-                              {card.deck_idx}: {card.name}
-                            </h3>
-                          </button>
-                        </div>
-                      );
-                    })}
-                  </div>
-                  <div>
-                    <button
-                      className="font-semibold uppercase bg-red-500"
-                      style={Styles.mainBtn}
-                      onClick={() => this.getNewHand()}
-                    >
-                      Get Hand
-                    </button>
-                  </div>
+                  {player_cards}
+                  {player_menu}
                 </div>
               </div>
             </div>

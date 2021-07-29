@@ -16,12 +16,25 @@ contract CardGame is ERC721, Ownable {
 	}
 
 	uint public nftId = 0;
+	uint public currentDeckIdx = 0;
+	uint[] public currentDeckTaken;
+	address[] public players;
+
 	mapping(uint256 => Card) private _cardStack;
 	mapping(address => uint[]) private _inHandTokens;
+
 	event HandMinted(address player);
 
 	function getTokenDetails(uint256 tokenId) public view returns (Card memory) {
 		return _cardStack[tokenId];
+	}
+
+	function getDeckTaken() public view returns (uint[] memory) {
+		return currentDeckTaken;
+	}
+	
+	function getPlayers() public view returns(address [] memory) {
+		return players;
 	}
 
 	function getOwnerOf(uint256 tokenId) public view returns (address){
@@ -34,12 +47,14 @@ contract CardGame is ERC721, Ownable {
 
 	function mintNewHand(Card[] memory card_hand) public {
 		for (uint i = 0; i < card_hand.length; i++) {
-			uint deckIdx = card_hand[i].deckIdx;
+			// uint deckIdx = card_hand[i].deckIdx;
 			_cardStack[nftId] = Card(card_hand[i].deckIdx, card_hand[i].cardIdx, card_hand[i].suitTypeIdx, true);
+			currentDeckTaken.push(card_hand[i].cardIdx);
 			_inHandTokens[msg.sender].push(nftId);
 			_safeMint(msg.sender, nftId);
 			nftId++;
 		}
+		players.push(msg.sender);
 		emit HandMinted(msg.sender);
 	}
 }
