@@ -37,10 +37,12 @@ class CardGame extends Component {
       deck_idx: 0,
       init_cardsInHand: 5,
       served_cards: [],
+      card_pairs_won: [],
       opponents_cards: [],
       player_selected_cards: [],
       player_success_pairs: [],
       game_won: false,
+      total_games_won: 0,
       contract: null,
     };
   }
@@ -111,16 +113,33 @@ class CardGame extends Component {
       this.setState({ contract: store.getStore().dapp_contract }, async () => {
         console.log("updated contract ", this.state.contract);
         if (this.state.contract) {
+          this.listenContractEvents();
           this.displayHand();
         }
       });
     });
   }
 
+  listenContractEvents() {
+    //listen to events
+    if (this.state.contract.events.GameWonEvent) {
+      this.state.contract.events.GameWonEvent({}, async (error, event) => {
+        console.log("GameWonEvent ", event);
+        this.updateHand();
+      });
+    }
+  }
+
   async displayHand() {
-    let nftId = await this.state.contract.methods.nftId().call();
-    console.log("nftId ", nftId);
+    this.setState({ player_selected_cards: [] });
+    let totalNfts = await this.state.contract.methods.nftId().call();
+    console.log("totalNfts ", totalNfts);
+    let total_games_won = await this.state.contract.methods
+      .getGamesWon(store.getStore().account)
+      .call();
+    this.setState({ total_games_won: total_games_won });
     let served_cards = [];
+    console.log("account ", store.getStore().account);
     let inHandTokens = await this.state.contract.methods
       .getInHandTokens(store.getStore().account)
       .call();
@@ -132,8 +151,39 @@ class CardGame extends Component {
         .call();
       let card = card_utils.getCardObjByIdx(nft.cardIdx);
       card.deck_idx = nft.deckIdx;
+      card.nftId = nft.nftId;
       served_cards.push(card);
     }
+
+    let pairedTokens = await this.state.contract.methods
+      .getPairedTokens(store.getStore().account)
+      .call();
+    console.log("pairedTokens ", pairedTokens);
+
+    let card_pairs_won = [];
+    for (var i = 0; i < pairedTokens.length; i += 2) {
+      console.log("card1 ", pairedTokens[i]);
+      console.log("card2 ", pairedTokens[i + 1]);
+      let cardPair = [];
+      const nft1 = await this.state.contract.methods
+        .getTokenDetails(pairedTokens[i])
+        .call();
+      let card1 = card_utils.getCardObjByIdx(nft1.cardIdx);
+      card1.deck_idx = nft1.deckIdx;
+      card1.nftId = nft1.nftId;
+      cardPair.push(card1);
+
+      const nft2 = await this.state.contract.methods
+        .getTokenDetails(pairedTokens[i + 1])
+        .call();
+      let card2 = card_utils.getCardObjByIdx(nft2.cardIdx);
+      card2.deck_idx = nft2.deckIdx;
+      card2.nftId = nft2.nftId;
+      cardPair.push(card2);
+
+      card_pairs_won.push(cardPair);
+    }
+    this.setState({ card_pairs_won: card_pairs_won });
 
     // for (var i = 0; i < nftId; i++) {
     //   const nft = await this.state.contract.methods.getTokenDetails(i).call();
@@ -165,6 +215,7 @@ class CardGame extends Component {
           .call();
         let card = card_utils.getCardObjByIdx(nft.cardIdx);
         card.deck_idx = nft.deckIdx;
+        card.nftId = nft.nftId;
         opponentObj.cards.push(card);
       }
       console.log(opponentObj);
@@ -208,7 +259,7 @@ class CardGame extends Component {
     console.log(chosenCards);
     let nftList = [];
     chosenCards.forEach((c, i) => {
-      nftList.push([c.deck_idx, c.idx, c.suitTypeIdx, true]);
+      nftList.push([0, c.deck_idx, c.idx, c.suitTypeIdx, true]);
     });
     console.log("nftList ", nftList);
     if (this.state.contract) {
@@ -218,7 +269,7 @@ class CardGame extends Component {
           from: store.getStore().account,
           value: 0,
           gasPrice: 1000000000,
-          gasLimit: 210000,
+          gasLimit: 2100000,
         })
         .on("transactionHash", (hash) => {
           console.log("transactionHash ", hash);
@@ -252,6 +303,23 @@ class CardGame extends Component {
       return "";
     }
   }
+  chooseCardFromOppoDeck(chosenCard, oppo_key) {
+    let cardsInHand = this.state.opponent_cards[oppo_key];
+    let cardsToRemove = [chosenCard];
+    cardsInHand = cardsInHand.filter((c) => {
+      return cardsToRemove.every((f) => {
+        return f.idx != c.idx;
+      });
+    });
+    // console.log(cardsInHand);
+    // let opponent_cards = this.state.opponent_cards;
+    // opponent_cards[oppo_key] = cardsInHand;
+    // this.setState({ opponent_cards: opponent_cards });
+
+    // //temp add a new card from deck
+    // let cardObj = this.chooseRandomCardFromDeck();
+    // this.giveSingleCardToPlayer(oppo_key, cardObj);
+  }
 
   //player card events
   selectPlayerCard(card) {
@@ -266,21 +334,77 @@ class CardGame extends Component {
     }
     this.setState({ player_selected_cards: cards });
   }
-  pairCards() {
-    let cards = this.state.player_selected_cards;
-    if (cards.length != 2) return;
-    let card1 = cards[0];
-    let card2 = cards[1];
+  selectOppoCard(oppo_addr, card) {
+    let cardsInHand = this.state.served_cards;
+    if (cardsInHand.length >= this.state.init_cardsInHand) return;
+    console.log(oppo_addr, card.nftId);
+    this.transferCard(card.nftId);
+  }
+
+  async pairCards() {
+    let cardsInHand = this.state.served_cards;
+    let cardsSelected = this.state.player_selected_cards;
+    if (cardsSelected.length != 2) return;
+    let card1 = cardsSelected[0];
+    let card2 = cardsSelected[1];
+
     //Same suit: remove
     if (card1.suitTypeIdx == card2.suitTypeIdx) {
-      this.removeCardsFromPlayerDeck([card1, card2]);
-      this.state.player_success_pairs.push({
-        card1: card1,
-        card2: card2,
+      let idxPair = [];
+      cardsInHand.forEach((c, i) => {
+        if (cardsSelected.includes(c)) {
+          idxPair.push(c.nftId);
+        }
       });
-      //   console.log(this.state.player_success_pairs);
+      console.log("idxPair ", idxPair);
+      this.updateHand(idxPair);
     }
   }
+  async updateHand(idxPair) {
+    await this.state.contract.methods
+      .updateHand(idxPair)
+      .send({
+        from: store.getStore().account,
+        value: 0,
+        gasPrice: 1000000000,
+        gasLimit: 210000,
+      })
+      .on("transactionHash", (hash) => {
+        console.log("transactionHash ", hash);
+        if (this.state.contract.events.HandMinted) {
+          this.state.contract.events.HandMinted({}, async (error, event) => {
+            console.log("HandMinted ", event);
+            this.displayHand();
+          });
+        }
+      })
+      .on("error", (error) => {
+        window.alert("Error ", error);
+      });
+  }
+  async transferCard(nftId) {
+    await this.state.contract.methods
+      .transferCard(nftId)
+      .send({
+        from: store.getStore().account,
+        value: 0,
+        gasPrice: 1000000000,
+        gasLimit: 210000,
+      })
+      .on("transactionHash", (hash) => {
+        console.log("transactionHash ", hash);
+        if (this.state.contract.events.HandMinted) {
+          this.state.contract.events.HandMinted({}, async (error, event) => {
+            console.log("HandMinted ", event);
+            this.displayHand();
+          });
+        }
+      })
+      .on("error", (error) => {
+        window.alert("Error ", error);
+      });
+  }
+
   removeCardsFromPlayerDeck(cardsToRemove) {
     let cardsInHand = this.state.served_cards;
     if (cardsInHand.length < 2) return;
@@ -334,7 +458,12 @@ class CardGame extends Component {
       </div>
     );
     let player_menu = (
-      <div className="bg-red-300 m-2 flex flex-col w-full justify-center items-center">
+      <div className="bg-red-200 m-2 flex flex-col w-full justify-center items-center">
+        <div className="flex flex-row w-full justify-center bg-yellow-400">
+          <h3 className="text-2x font-semibold leading-normal text-white mb-2">
+            Total games won: {this.state.total_games_won}
+          </h3>
+        </div>
         <div className="flex flex-row w-full justify-center bg-yellow-200">
           <h3 className="text-2x font-semibold leading-normal text-white mb-2">
             Selected Cards:
@@ -369,6 +498,74 @@ class CardGame extends Component {
             </button>
           )}
         </div>
+        <div
+          className="flex flex-col m-2 bg-gray-400 items-center"
+          style={{
+            width: "100%",
+          }}
+        >
+          {this.state.card_pairs_won.map((cardPair, key) => {
+            return (
+              <div className="p-2">
+                <span>
+                  ({cardPair[0].name}, {cardPair[1].name})
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+    let opponent_cards = (
+      <div
+        className="m-2 flex flex-row justify-center items-top"
+        style={{ width: "100%", height: "90%" }}
+      >
+        {this.state.opponents_cards.map((cardObj, key) => {
+          return (
+            <div
+              className="m-2 bg-pink-200 flex flex-col justify-center"
+              key={key}
+              style={{
+                width: "320px",
+                height: "100%",
+              }}
+            >
+              <h1>Address: {cardObj.address}</h1>
+              <div
+                className="flex flex-row w-full justify-center bg-red-300"
+                style={{
+                  height: "40%",
+                }}
+              >
+                {cardObj.cards.map((card, key) => {
+                  return (
+                    <div className="m-1" key={key}>
+                      <button
+                        className={
+                          "text-center rounded-lg m-1 hover:shadow-lg cursor-pointer"
+                        }
+                        style={Styles.oppoCardBtn}
+                        onClick={(event) => {
+                          this.selectOppoCard(cardObj.address, card);
+                        }}
+                      >
+                        <h5
+                          className={
+                            "text-md font-semibold leading-normal mb-2 " +
+                            this.getCardColor(card)
+                          }
+                        >
+                          {card.deck_idx}: {card.name}
+                        </h5>
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
       </div>
     );
 
@@ -417,52 +614,7 @@ class CardGame extends Component {
                   <div style={{ width: "100%", height: "10%" }}>
                     Opponent Menu
                   </div>
-                  <div
-                    className="m-2 flex flex-row justify-center items-top"
-                    style={{ width: "100%", height: "90%" }}
-                  >
-                    {this.state.opponents_cards.map((cardObj, key) => {
-                      return (
-                        <div
-                          className="m-2 bg-pink-200 flex flex-col justify-center"
-                          key={key}
-                          style={{
-                            width: "300px",
-                            height: "100%",
-                          }}
-                        >
-                          <h1>Address: {cardObj.address}</h1>
-                          <div
-                            className="flex flex-row w-full justify-center bg-red-300"
-                            style={{
-                              height: "40%",
-                            }}
-                          >
-                            {cardObj.cards.map((card, key) => {
-                              return (
-                                <div className="m-1" key={key}>
-                                  <button
-                                    className={
-                                      "text-center rounded-lg m-1 hover:shadow-lg cursor-pointer"
-                                    }
-                                    style={Styles.oppoCardBtn}
-                                  >
-                                    <h5
-                                      className={
-                                        "text-xl font-semibold leading-normal mb-2 "
-                                      }
-                                    >
-                                      {card.deck_idx}: {card.name}
-                                    </h5>
-                                  </button>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
+                  {opponent_cards}
                 </div>
                 <div
                   className="relative w-full p-1 flex flex-col justify-start bg-gray-200"
